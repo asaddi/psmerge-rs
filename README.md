@@ -38,5 +38,4 @@ Existing files are backed up with the `~` suffix (i.e. Emacs-style).
 
  * Unix owner/group/mode (per template)
  * Default template output name (strip `.j2` extension, render in same directory)
- * Switch to disable backups
  * Additional suffix support, which are appended to Parameter Store prefixes & Secrets Manager secret names. For example, suffixes `aaa` & `bbb` result in scanning: `/Global`, `/Global_aaa`, `/Global_bbb`, etc.

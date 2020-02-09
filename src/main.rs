@@ -40,6 +40,10 @@ struct Opt {
     #[structopt(short="n", long="dry-run")]
     dryrun: bool,
 
+    /// Do not back up overwritten files.
+    #[structopt(short="B", long="no-backup")]
+    nobackup: bool,
+
     /// Configuration file
     config: PathBuf,
 }
@@ -218,7 +222,7 @@ fn main() -> Result<()> {
             .with_context(|| format!("Error rendering template {}", template_path.display()))?;
 
         if !opt.dryrun {
-            output::output(&ts.out, result.as_bytes(), opt.verbose)?;
+            output::output(&ts.out, result.as_bytes(), opt.nobackup, opt.verbose)?;
         }
     }
 

@@ -19,22 +19,29 @@ use std::fs::{File, rename, write};
 use anyhow::{Context, Result};
 use sha2::{Sha256, Digest};
 
+const BUFFER_SIZE: usize = 10240;
 const BACKUP_SUFFIX: &str = "~";
 
 type MyHash = Sha256;
 
-fn hash_file(path: &Path) -> Result<Option<Vec<u8>>> {
+fn hash_file<D: Digest + Default>(path: &Path) -> Result<Option<Vec<u8>>> {
     let mut hash: Option<Vec<u8>> = None;
 
     if let Ok(mut f) = File::open(path) {
-        // Read the file
-        // FIXME Break it up into smaller chunks?
-        let mut contents = Vec::new();
-        let len = f.read_to_end(&mut contents)?;
+        // Read the file & hash it
+        let mut contents: Vec<u8> = Vec::with_capacity(BUFFER_SIZE);
+        contents.resize_with(BUFFER_SIZE, Default::default); // Seems wasteful?
 
-        // And hash it
-        let mut hasher = MyHash::new();
-        hasher.input(&contents[0..len]);
+        let mut hasher = D::new();
+
+        loop {
+            let len = f.read(&mut contents)?;
+            hasher.input(&contents[..len]);
+
+            if len == 0 || len < BUFFER_SIZE {
+                break;
+            }
+        }
 
         let mut h = Vec::new();
         h.extend_from_slice(&hasher.result()[..]);
@@ -60,8 +67,8 @@ fn backup_file(path: &Path) -> Result<()> {
     Ok(())
 }
 
-pub fn output(path: &Path, contents: &[u8], verbosity: u8) -> Result<()> {
-    if let Some(hash) = hash_file(path).with_context(|| format!("Error hashing file {}", path.display()))? {
+pub fn output(path: &Path, contents: &[u8], nobackup: bool, verbosity: u8) -> Result<()> {
+    if let Some(hash) = hash_file::<MyHash>(path).with_context(|| format!("Error hashing file {}", path.display()))? {
         // Hash contents
         let mut hasher = MyHash::new();
         hasher.input(contents);
@@ -74,8 +81,10 @@ pub fn output(path: &Path, contents: &[u8], verbosity: u8) -> Result<()> {
         }
     }
 
-    backup_file(path)
-        .with_context(|| format!("Error backing up file {}", path.display()))?;
+    if !nobackup {
+        backup_file(path)
+            .with_context(|| format!("Error backing up file {}", path.display()))?;
+    }
 
     write(path, contents)?;
     Ok(())
