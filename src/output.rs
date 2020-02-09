@@ -29,8 +29,7 @@ fn hash_file<D: Digest + Default>(path: &Path) -> Result<Option<Vec<u8>>> {
 
     if let Ok(mut f) = File::open(path) {
         // Read the file & hash it
-        let mut contents: Vec<u8> = Vec::with_capacity(BUFFER_SIZE);
-        contents.resize_with(BUFFER_SIZE, Default::default); // Seems wasteful?
+        let mut contents: Vec<u8> = vec![0u8; BUFFER_SIZE];
 
         let mut hasher = D::new();
 
