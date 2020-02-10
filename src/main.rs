@@ -24,6 +24,7 @@ use rusoto_secretsmanager::*;
 use tera;
 use anyhow::{Context, Result};
 
+mod model;
 mod output;
 
 #[derive(StructOpt, Debug)]
@@ -188,11 +189,11 @@ fn main() -> Result<()> {
     // Retrieve all properties from AWS
     let param_store_prefixes = config.parameter_store_prefixes.unwrap_or_default();
     let secrets = config.secrets.unwrap_or_default();
-    let mut context = tera::Context::new();
-    for (k,v) in get_properties(&region, &param_store_prefixes, &secrets, opt.verbose)? {
-        // Stuff key/value into template context
-        context.insert(k, &v);
-    }
+    let data = get_properties(&region, &param_store_prefixes, &secrets, opt.verbose)?;
+
+    let model = model::build_template_model(data);
+    if opt.verbose > 1 { println!("model = {:#?}", model); }
+    let context = tera::Context::from_value(model)?;
 
     // Base directory of config file (for relative templates)
     let mut config_dir = opt.config.clone().canonicalize().unwrap();
