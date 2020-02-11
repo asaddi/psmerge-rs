@@ -107,24 +107,34 @@ fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result
 }
 
 fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<HashMap<String, String>> {
-    let mut _data = HashMap::new();
+    let mut data = HashMap::new();
 
     let client = SecretsManagerClient::new(region.clone());
 
     for secret in secrets {
-        let _result = client.get_secret_value(GetSecretValueRequest {
+        let result = match client.get_secret_value(GetSecretValueRequest {
             secret_id: secret.clone(),
             ..Default::default()
-        }).sync().with_context(|| format!("Failed to get secret {}", secret))?;
+        }).sync().with_context(|| format!("Failed to get secret {}", secret)) {
+            Ok(response) => response,
+            Err(e) => {
+                // Ignore if it's ResourceNotFound
+                if let Some(GetSecretValueError::ResourceNotFound(_)) = e.root_cause().downcast_ref::<GetSecretValueError>() {
+                    continue;
+                }
+                // Everything else
+                return Err(e);
+            }
+        };
 
         // Only deal with strings
-        match _result.secret_string {
+        match result.secret_string {
             Some(s) => {
                 match serde_json::from_str::<Value>(&s) {
                     Ok(Value::Object(map)) => {
                         for (k,jv) in map {
                             match jv {
-                                Value::String(v) => { _data.insert(k, v); }
+                                Value::String(v) => { data.insert(k, v); }
                                 _ => eprintln!("WARNING: Secret {}/{} value not JSON string", secret, k)
                             }
                         }
@@ -136,7 +146,7 @@ fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<
         }
     }
 
-    Ok(_data)
+    Ok(data)
 }
 
 fn merge_properties(properties: Vec<HashMap<String, String>>) -> HashMap<String, String> {
