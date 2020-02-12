@@ -73,11 +73,19 @@ fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result
     let client = SsmClient::new(region.clone());
 
     for prefix in prefixes {
+        let prefix = prefix.trim_end_matches('/'); // TODO Replace with strip_suffix once available
+        let prefix_with_slash = {
+            let mut s = String::with_capacity(prefix.len() + 1);
+            s.push_str(prefix);
+            s.push('/');
+            s
+        };
+
         let mut next_token: Option<String> = None;
 
         loop {
             let params = client.get_parameters_by_path(GetParametersByPathRequest {
-                path: prefix.clone(),
+                path: prefix_with_slash.clone(),
                 next_token,
                 ..Default::default()
             }).sync().with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
