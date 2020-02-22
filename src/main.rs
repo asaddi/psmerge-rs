@@ -14,6 +14,7 @@
 
 use std::collections::HashMap;
 use std::path::PathBuf;
+use std::fs::File;
 
 use structopt::StructOpt;
 use serde::Deserialize;
@@ -21,7 +22,7 @@ use serde_json::Value;
 use rusoto_core::Region;
 use rusoto_ssm::*;
 use rusoto_secretsmanager::*;
-use tera;
+use handlebars::{Handlebars, no_escape};
 use anyhow::{Context, Result};
 
 mod model;
@@ -209,9 +210,14 @@ fn main() -> Result<()> {
     let secrets = config.secrets.unwrap_or_default();
     let data = get_properties(&region, &param_store_prefixes, &secrets, opt.verbose)?;
 
+    // Generate (JSON) template model
     let model = model::build_template_model(data);
     if opt.verbose > 1 { println!("model = {:#?}", model); }
-    let context = tera::Context::from_value(model)?;
+
+    // Initialize template engine
+    let mut handlebars = Handlebars::new();
+    handlebars.register_escape_fn(no_escape);
+    handlebars.set_strict_mode(true);
 
     // Base directory of config file (for relative templates)
     let mut config_dir = opt.config.clone().canonicalize().unwrap();
@@ -232,16 +238,15 @@ fn main() -> Result<()> {
 
         if opt.verbose > 0 { println!("Rendering template {}...", template_path.display()); }
 
-        let template_bytes = std::fs::read(&template_path)
+        let mut template_file = File::open(&template_path)
             .with_context(|| format!("Error reading template {}", template_path.display()))?;
-        let template_data: String = String::from_utf8_lossy(&template_bytes).parse()
-            .with_context(|| format!("Error parsing template {}", template_path.display()))?;
 
-        let result = tera::Tera::one_off(&template_data, &context, false)
+        let mut result: Vec<u8> = Vec::new();
+        handlebars.render_template_source_to_write(&mut template_file, &model, &mut result)
             .with_context(|| format!("Error rendering template {}", template_path.display()))?;
 
         if !opt.dryrun {
-            output::output(&ts.out, result.as_bytes(), opt.nobackup, opt.verbose)?;
+            output::output(&ts.out, &result, opt.nobackup, opt.verbose)?;
         }
     }
 

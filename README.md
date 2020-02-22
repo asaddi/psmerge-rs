@@ -6,7 +6,7 @@ Needless to say, this is a toy! And I'm sure there are a billion other, better s
 
 ## Configuration File Example ##
 
-Create a YAML file somewhere along with your Jinja2 templates. (Note: Jinja2 support is as good as the [tera](https://crates.io/crates/tera) crate's. YMMV.)
+Create a YAML file somewhere along with your Handlerbars templates.
 
     region: us-west-2
     parameter_store_prefixes:
@@ -19,9 +19,9 @@ Create a YAML file somewhere along with your Jinja2 templates. (Note: Jinja2 sup
       - MySecret1
       - MySecret2
     templates:
-      - src: relative/path/from/config/template1.j2
+      - src: relative/path/from/config/template1.hnb
         out: /path/to/destination1
-      - src: /some/absolute/path/template2.j2
+      - src: /some/absolute/path/template2.hnb
         out: /path/to/destination2
 
 Everything except `templates` are optional.
@@ -37,5 +37,5 @@ Existing files are backed up with the `~` suffix (i.e. Emacs-style).
 ## To Do ##
 
  * Unix owner/group/mode (per template)
- * Default template output name (strip `.j2` extension, render in same directory)
+ * Default template output name (strip `.hnb` extension, render in same directory)
  * Additional suffix support, which are appended to Parameter Store prefixes & Secrets Manager secret names. For example, suffixes `aaa` & `bbb` result in scanning: `/Global`, `/Global_aaa`, `/Global_bbb`, etc.
