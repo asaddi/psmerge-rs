@@ -3,16 +3,13 @@ use std::collections::HashMap;
 use serde_json::{Value, Map};
 
 fn insert_with_path(object: &mut Value, path: &[&str], key_pos: usize, value: &str) {
-    if key_pos == (path.len() - 1) {
-        // Simple key
-        match object.as_object_mut() {
-            Some(m) => { m.insert(path[key_pos].to_owned(), Value::String(value.to_owned())); },
-            None => eprintln!("WARNING: Key {} ignored because the dotted prefix is already in use", path.join("."))
-        }
-    }
-    else {
-        match object.as_object_mut() {
-            Some(m) => {
+    match object.as_object_mut() {
+        Some(m) => {
+            if key_pos == (path.len() - 1) {
+                // Simple key
+                m.insert(path[key_pos].to_owned(), Value::String(value.to_owned()));
+            }
+            else {
                 match m.get_mut(path[key_pos]) {
                     Some(next) => insert_with_path(next, path, key_pos + 1, value),
                     None => {
@@ -22,9 +19,9 @@ fn insert_with_path(object: &mut Value, path: &[&str], key_pos: usize, value: &s
                         insert_with_path(m.get_mut(new_obj_name).unwrap(), path, key_pos + 1, value);
                     }
                 }
-            },
-            None => eprintln!("WARNING: Key {} ignored because the dotted prefix is already in use", path.join("."))
-        }
+            }
+        },
+        None => eprintln!("WARNING: Key {} ignored because the dotted prefix is already in use", path.join("."))
     }
 }
 
