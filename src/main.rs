@@ -10,6 +10,7 @@ use rusoto_ssm::*;
 use rusoto_secretsmanager::*;
 use handlebars::{Handlebars, no_escape};
 use anyhow::{Context, Result};
+use tokio::{join, runtime::Runtime};
 
 mod model;
 mod output;
@@ -54,13 +55,13 @@ fn trim_prefix<'a>(prefix : &str, s: &'a str) -> &'a str {
     &s[prefix.len()+1..]
 }
 
-fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result<HashMap<String, String>> {
+async fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result<HashMap<String, String>> {
     let mut data = HashMap::new();
 
     let client = SsmClient::new(region.clone());
 
     for prefix in prefixes {
-        let prefix = prefix.trim_end_matches('/'); // TODO Replace with strip_suffix once available
+        let prefix = prefix.strip_suffix('/').unwrap_or(prefix);
         let prefix_with_slash = {
             let mut s = String::with_capacity(prefix.len() + 1);
             s.push_str(prefix);
@@ -75,7 +76,7 @@ fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result
                 path: prefix_with_slash.clone(),
                 next_token,
                 ..Default::default()
-            }).sync().with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
+            }).await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
 
             if let Some(parameters) = params.parameters {
                 for p in &parameters {
@@ -101,7 +102,7 @@ fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result
     Ok(data)
 }
 
-fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<HashMap<String, String>> {
+async fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<HashMap<String, String>> {
     let mut data = HashMap::new();
 
     let client = SecretsManagerClient::new(region.clone());
@@ -110,7 +111,7 @@ fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<
         let result = match client.get_secret_value(GetSecretValueRequest {
             secret_id: secret.clone(),
             ..Default::default()
-        }).sync().with_context(|| format!("Failed to get secret {}", secret)) {
+        }).await.with_context(|| format!("Failed to get secret {}", secret)) {
             Ok(response) => response,
             Err(e) => {
                 // Ignore if it's ResourceNotFound
@@ -156,14 +157,23 @@ fn merge_properties(properties: Vec<HashMap<String, String>>) -> HashMap<String,
     merged
 }
 
-fn get_properties(region: &Region, param_store_prefixes: &[String], secrets: &[String], verbosity: u8) -> Result<HashMap<String, String>> {
+async fn get_properties(region: &Region, param_store_prefixes: &[String], secrets: &[String], verbosity: u8) -> Result<HashMap<String, String>> {
     // Retrieve from Parameter Store
-    let ps_data = get_parameterstore_properties(region, param_store_prefixes)?;
-    if verbosity > 1 { println!("ps_data = {:#?}", ps_data); }
+    let ps_fut = get_parameterstore_properties(region, param_store_prefixes);
 
     // Retrieve from Secrets Manager
-    let sm_data = get_secretsmanager_properties(region, secrets)?;
-    if verbosity > 1 { println!("sm_data = {:#?}", sm_data); }
+    let sm_fut = get_secretsmanager_properties(region, secrets);
+
+    // TODO Could probably use try_join! here... But how?
+    let (ps_res, sm_res) = join!(ps_fut, sm_fut);
+
+    let ps_data = ps_res?;
+    let sm_data = sm_res?;
+
+    if verbosity > 1 {
+        println!("ps_data = {:#?}", ps_data);
+        println!("sm_data = {:#?}", sm_data);
+    }
 
     // Merge results (Secrets Manager takes precedence)
     let data = merge_properties(vec![ps_data, sm_data]);
@@ -194,7 +204,9 @@ fn main() -> Result<()> {
     // Retrieve all properties from AWS
     let param_store_prefixes = config.parameter_store_prefixes.unwrap_or_default();
     let secrets = config.secrets.unwrap_or_default();
-    let data = get_properties(&region, &param_store_prefixes, &secrets, opt.verbose)?;
+
+    let rt = Runtime::new().unwrap();
+    let data = rt.block_on(get_properties(&region, &param_store_prefixes, &secrets, opt.verbose))?;
 
     // Generate (JSON) template model
     let model = model::build_template_model(data);
