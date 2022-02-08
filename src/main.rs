@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs::File;
 
-use structopt::StructOpt;
+use clap::Parser;
 use serde::Deserialize;
 use serde_json::Value;
 use rusoto_core::Region;
@@ -15,22 +15,22 @@ use tokio::{join, runtime::Runtime};
 mod model;
 mod output;
 
-#[derive(StructOpt, Debug)]
+#[derive(Parser, Debug)]
 struct Opt {
     /// AWS region.
-    #[structopt(long)]
+    #[clap(long)]
     region: Option<String>,
 
     /// Increase verbosity.
-    #[structopt(short, long, parse(from_occurrences))]
+    #[clap(short, long, parse(from_occurrences))]
     verbose: u8,
 
     /// Do not actually write anything out.
-    #[structopt(short="n", long="dry-run")]
+    #[clap(short='n', long="dry-run")]
     dryrun: bool,
 
     /// Do not back up overwritten files.
-    #[structopt(short="B", long="no-backup")]
+    #[clap(short='B', long="no-backup")]
     nobackup: bool,
 
     /// Configuration file
@@ -184,7 +184,7 @@ async fn get_properties(region: &Region, param_store_prefixes: &[String], secret
 
 fn main() -> Result<()> {
     // Parse command line args
-    let opt = Opt::from_args();
+    let opt = Opt::parse();
 
     // Parse config file
     let config_bytes = std::fs::read(&opt.config)
@@ -218,7 +218,7 @@ fn main() -> Result<()> {
     handlebars.set_strict_mode(true);
 
     // Base directory of config file (for relative templates)
-    let mut config_dir = opt.config.clone().canonicalize().unwrap();
+    let mut config_dir = opt.config.canonicalize().unwrap();
     config_dir.pop();
 
     // Render the templates
