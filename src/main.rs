@@ -2,12 +2,11 @@ use std::collections::HashMap;
 use std::path::PathBuf;
 use std::fs::File;
 
+use aws_config::{Region, SdkConfig};
+use aws_sdk_secretsmanager::types::error::ResourceNotFoundException;
 use clap::Parser;
 use serde::Deserialize;
 use serde_json::Value;
-use rusoto_core::Region;
-use rusoto_ssm::*;
-use rusoto_secretsmanager::*;
 use handlebars::{Handlebars, no_escape};
 use anyhow::{Context, Result};
 use tokio::{join, runtime::Runtime};
@@ -22,7 +21,7 @@ struct Opt {
     region: Option<String>,
 
     /// Increase verbosity.
-    #[clap(short, long, parse(from_occurrences))]
+    #[clap(short, long, action = clap::ArgAction::Count)]
     verbose: u8,
 
     /// Do not actually write anything out.
@@ -55,10 +54,10 @@ fn trim_prefix<'a>(prefix : &str, s: &'a str) -> &'a str {
     &s[prefix.len()+1..]
 }
 
-async fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> Result<HashMap<String, String>> {
+async fn get_parameterstore_properties(config: &SdkConfig, prefixes: &[String]) -> Result<HashMap<String, String>> {
     let mut data = HashMap::new();
 
-    let client = SsmClient::new(region.clone());
+    let client = aws_sdk_ssm::Client::new(config);
 
     for prefix in prefixes {
         let prefix = prefix.strip_suffix('/').unwrap_or(prefix);
@@ -72,11 +71,15 @@ async fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> 
         let mut next_token: Option<String> = None;
 
         loop {
-            let params = client.get_parameters_by_path(GetParametersByPathRequest {
-                path: prefix_with_slash.clone(),
-                next_token,
-                ..Default::default()
-            }).await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
+            let params = client.get_parameters_by_path()
+                .path(&prefix_with_slash)
+                .set_next_token(next_token) // It's an Option, so use this instead of next_token()
+                .send().await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
+            // let params = client.get_parameters_by_path(GetParametersByPathRequest {
+            //     path: prefix_with_slash.clone(),
+            //     next_token,
+            //     ..Default::default()
+            // }).await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
 
             if let Some(parameters) = params.parameters {
                 for p in &parameters {
@@ -102,20 +105,19 @@ async fn get_parameterstore_properties(region: &Region, prefixes: &[String]) -> 
     Ok(data)
 }
 
-async fn get_secretsmanager_properties(region: &Region, secrets: &[String]) -> Result<HashMap<String, String>> {
+async fn get_secretsmanager_properties(config: &SdkConfig, secrets: &[String]) -> Result<HashMap<String, String>> {
     let mut data = HashMap::new();
 
-    let client = SecretsManagerClient::new(region.clone());
+    let client = aws_sdk_secretsmanager::Client::new(config);
 
     for secret in secrets {
-        let result = match client.get_secret_value(GetSecretValueRequest {
-            secret_id: secret.clone(),
-            ..Default::default()
-        }).await.with_context(|| format!("Failed to get secret {}", secret)) {
+        let result = match client.get_secret_value()
+            .secret_id(secret)
+            .send().await.with_context(|| format!("Failed to get secret {}", secret)) {
             Ok(response) => response,
             Err(e) => {
                 // Ignore if it's ResourceNotFound
-                if let Some(GetSecretValueError::ResourceNotFound(_)) = e.root_cause().downcast_ref::<GetSecretValueError>() {
+                if e.root_cause().downcast_ref::<ResourceNotFoundException>().is_some() {
                     continue;
                 }
                 // Everything else
@@ -157,12 +159,12 @@ fn merge_properties(properties: Vec<HashMap<String, String>>) -> HashMap<String,
     merged
 }
 
-async fn get_properties(region: &Region, param_store_prefixes: &[String], secrets: &[String], verbosity: u8) -> Result<HashMap<String, String>> {
+async fn get_properties(config: &SdkConfig, param_store_prefixes: &[String], secrets: &[String], verbosity: u8) -> Result<HashMap<String, String>> {
     // Retrieve from Parameter Store
-    let ps_fut = get_parameterstore_properties(region, param_store_prefixes);
+    let ps_fut = get_parameterstore_properties(config, param_store_prefixes);
 
     // Retrieve from Secrets Manager
-    let sm_fut = get_secretsmanager_properties(region, secrets);
+    let sm_fut = get_secretsmanager_properties(config, secrets);
 
     // TODO Could probably use try_join! here... But how?
     let (ps_res, sm_res) = join!(ps_fut, sm_fut);
@@ -192,21 +194,27 @@ fn main() -> Result<()> {
     let config: Config = serde_yaml::from_str(&String::from_utf8_lossy(&config_bytes))
         .with_context(|| format!("Error parsing config {}", opt.config.display()))?;
 
+    // Only need to selectively go async
+    let rt = Runtime::new().unwrap();
+    let base_sdk_config = rt.block_on(aws_config::load_from_env());
+
     // Determine region. Priority: command line > config file > environment > profile
     let region = match opt.region {
-        Some(region_str) => region_str.parse()?,
-        _ => match config.region {
-            Some(region_str) => region_str.parse()?,
-            _ => Region::default()
-        }
+        Some(region_str) => Some(Region::new(region_str)),
+        _ => config.region.map(Region::new)
+    };
+
+    // Switch to new region, if needed
+    let sdk_config = match region {
+        Some(region) => base_sdk_config.into_builder().region(region).build(),
+        _ => base_sdk_config
     };
 
     // Retrieve all properties from AWS
     let param_store_prefixes = config.parameter_store_prefixes.unwrap_or_default();
     let secrets = config.secrets.unwrap_or_default();
 
-    let rt = Runtime::new().unwrap();
-    let data = rt.block_on(get_properties(&region, &param_store_prefixes, &secrets, opt.verbose))?;
+    let data = rt.block_on(get_properties(&sdk_config, &param_store_prefixes, &secrets, opt.verbose))?;
 
     // Generate (JSON) template model
     let model = model::build_template_model(data);
