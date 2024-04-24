@@ -73,6 +73,7 @@ async fn get_parameterstore_properties(config: &SdkConfig, prefixes: &[String]) 
         loop {
             let params = client.get_parameters_by_path()
                 .path(&prefix_with_slash)
+                .with_decryption(true)
                 .set_next_token(next_token) // It's an Option, so use this instead of next_token()
                 .send().await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
             // let params = client.get_parameters_by_path(GetParametersByPathRequest {
