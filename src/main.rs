@@ -1,6 +1,5 @@
 use std::collections::HashMap;
 use std::path::PathBuf;
-use std::fs::File;
 
 use aws_config::{Region, SdkConfig};
 use aws_sdk_secretsmanager::types::error::ResourceNotFoundException;
@@ -245,11 +244,11 @@ fn main() -> Result<()> {
 
         if opt.verbose > 0 { println!("Rendering template {}...", template_path.display()); }
 
-        let mut template_file = File::open(&template_path)
-            .with_context(|| format!("Error reading template {}", template_path.display()))?;
+        handlebars.register_template_file("template", &template_path)
+            .with_context(|| format!("Error registering template {}", template_path.display()))?;
 
         let mut result: Vec<u8> = Vec::new();
-        handlebars.render_template_source_to_write(&mut template_file, &model, &mut result)
+        handlebars.render_to_write("template", &model, &mut result)
             .with_context(|| format!("Error rendering template {}", template_path.display()))?;
 
         if !opt.dryrun {
