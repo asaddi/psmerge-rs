@@ -75,7 +75,7 @@ async fn get_parameterstore_properties(config: &SdkConfig, prefixes: &[String]) 
                 .path(&prefix_with_slash)
                 .with_decryption(true)
                 .set_next_token(next_token) // It's an Option, so use this instead of next_token()
-                .send().await.with_context(|| format!("Failed to retrieve parameter {}", prefix))?;
+                .send().await.with_context(|| format!("Failed to retrieve parameter {prefix}"))?;
             // let params = client.get_parameters_by_path(GetParametersByPathRequest {
             //     path: prefix_with_slash.clone(),
             //     next_token,
@@ -114,7 +114,7 @@ async fn get_secretsmanager_properties(config: &SdkConfig, secrets: &[String]) -
     for secret in secrets {
         let result = match client.get_secret_value()
             .secret_id(secret)
-            .send().await.with_context(|| format!("Failed to get secret {}", secret)) {
+            .send().await.with_context(|| format!("Failed to get secret {secret}")) {
             Ok(response) => response,
             Err(e) => {
                 // Ignore if it's ResourceNotFound
@@ -134,14 +134,14 @@ async fn get_secretsmanager_properties(config: &SdkConfig, secrets: &[String]) -
                         for (k,jv) in map {
                             match jv {
                                 Value::String(v) => { data.insert(k, v); }
-                                _ => eprintln!("WARNING: Secret {}/{} value not JSON string", secret, k)
+                                _ => eprintln!("WARNING: Secret {secret}/{k} value not JSON string")
                             }
                         }
                     }
-                    _ => eprintln!("WARNING: Secret {} value not JSON object", secret)
+                    _ => eprintln!("WARNING: Secret {secret} value not JSON object")
                 }
             }
-            None => eprintln!("WARNING: Secret {} value not a string", secret)
+            None => eprintln!("WARNING: Secret {secret} value not a string")
         }
     }
 
@@ -174,13 +174,13 @@ async fn get_properties(config: &SdkConfig, param_store_prefixes: &[String], sec
     let sm_data = sm_res?;
 
     if verbosity > 1 {
-        println!("ps_data = {:#?}", ps_data);
-        println!("sm_data = {:#?}", sm_data);
+        println!("ps_data = {ps_data:#?}");
+        println!("sm_data = {sm_data:#?}");
     }
 
     // Merge results (Secrets Manager takes precedence)
     let data = merge_properties(vec![ps_data, sm_data]);
-    if verbosity > 0 { println!("data = {:#?}", data); }
+    if verbosity > 0 { println!("data = {data:#?}"); }
 
     Ok(data)
 }
@@ -219,7 +219,7 @@ fn main() -> Result<()> {
 
     // Generate (JSON) template model
     let model = model::build_template_model(data);
-    if opt.verbose > 1 { println!("model = {:#?}", model); }
+    if opt.verbose > 1 { println!("model = {model:#?}"); }
 
     // Initialize template engine
     let mut handlebars = Handlebars::new();
